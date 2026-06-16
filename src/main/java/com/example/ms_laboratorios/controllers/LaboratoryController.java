@@ -66,6 +66,16 @@ public class LaboratoryController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * GET /api/laboratory/patients/{patientId}
+     * Retrieves all lab orders for a specific patient.
+     */
+    @GetMapping("/patients/{patientId}")
+    public ResponseEntity<java.util.List<LabOrder>> getOrdersByPatientId(@PathVariable("patientId") Long patientId) {
+        java.util.List<LabOrder> orders = laboratoryService.getOrdersByPatientId(patientId);
+        return ResponseEntity.ok(orders);
+    }
+
     // --- DTOs ---
 
     @Data

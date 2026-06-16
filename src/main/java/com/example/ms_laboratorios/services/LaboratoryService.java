@@ -81,6 +81,15 @@ public class LaboratoryService {
     }
 
     /**
+     * Retrieves all lab orders for a given patient ID.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<LabOrder> getOrdersByPatientId(Long patientId) {
+        log.info("Fetching lab orders for patient: {}", patientId);
+        return labOrderRepository.findByPatientId(patientId);
+    }
+
+    /**
      * Simulates sending a notification asynchronously to the doctor.
      */
     private void triggerAsyncNotification(Long doctorId, Long orderId) {
