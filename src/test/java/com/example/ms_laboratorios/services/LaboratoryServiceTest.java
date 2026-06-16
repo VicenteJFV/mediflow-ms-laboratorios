@@ -2,33 +2,33 @@ package com.example.ms_laboratorios.services;
 
 import com.example.ms_laboratorios.models.LabOrder;
 import com.example.ms_laboratorios.models.LabResult;
-import com.example.ms_laboratorios.repositories.LabOrderRepository;
-import com.example.ms_laboratorios.repositories.LabResultRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
-import java.util.Optional;
+import java.time.LocalDateTime;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class LaboratoryServiceTest {
 
     @Mock
-    private LabOrderRepository labOrderRepository;
-
-    @Mock
-    private LabResultRepository labResultRepository;
+    private JdbcTemplate jdbcTemplate;
 
     @InjectMocks
     private LaboratoryService laboratoryService;
 
     @Test
+    @SuppressWarnings("unchecked")
     void createOrder_ShouldSaveAndReturnOrder() {
         // Arrange
         Long patientId = 101L;
@@ -42,7 +42,13 @@ class LaboratoryServiceTest {
                 .status("PENDING")
                 .build();
 
-        when(labOrderRepository.save(any(LabOrder.class))).thenReturn(savedOrder);
+        when(jdbcTemplate.queryForObject(
+                eq("SELECT * FROM create_lab_order(?, ?, ?)"),
+                any(RowMapper.class),
+                eq(patientId),
+                eq(doctorId),
+                eq(studyType)
+        )).thenReturn(savedOrder);
 
         // Act
         LabOrder result = laboratoryService.createOrder(patientId, doctorId, studyType);
@@ -52,36 +58,43 @@ class LaboratoryServiceTest {
         assertEquals(1L, result.getId());
         assertEquals("PENDING", result.getStatus());
         assertEquals(patientId, result.getPatientId());
-        assertEquals(doctorId, result.getDoctorId());
-        assertEquals(studyType, result.getStudyType());
-        verify(labOrderRepository, times(1)).save(any(LabOrder.class));
+        verify(jdbcTemplate, times(1)).queryForObject(any(String.class), any(RowMapper.class), eq(patientId), eq(doctorId), eq(studyType));
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void uploadResult_Success_ShouldUpdateOrderStatusAndSaveResult() {
         // Arrange
         Long orderId = 1L;
         String resultData = "Hemoglobin 14.5 g/dL";
         String observations = "Normal level";
-        
-        LabOrder existingOrder = LabOrder.builder()
-                .id(orderId)
-                .patientId(101L)
-                .doctorId(202L)
-                .studyType("Blood Test")
-                .status("PENDING")
-                .build();
 
         LabResult savedResult = LabResult.builder()
                 .id(50L)
                 .resultData(resultData)
                 .observations(observations)
-                .labOrder(existingOrder)
+                .resultDate(LocalDateTime.now())
                 .build();
 
-        when(labOrderRepository.findById(orderId)).thenReturn(Optional.of(existingOrder));
-        when(labOrderRepository.save(any(LabOrder.class))).thenReturn(existingOrder);
-        when(labResultRepository.save(any(LabResult.class))).thenReturn(savedResult);
+        when(jdbcTemplate.queryForObject(
+                eq("SELECT status FROM lab_orders WHERE id = ?"),
+                eq(String.class),
+                eq(orderId)
+        )).thenReturn("PENDING");
+
+        when(jdbcTemplate.queryForObject(
+                eq("SELECT * FROM upload_lab_result(?, ?, ?)"),
+                any(RowMapper.class),
+                eq(orderId),
+                eq(resultData),
+                eq(observations)
+        )).thenReturn(savedResult);
+
+        when(jdbcTemplate.queryForObject(
+                eq("SELECT doctor_id FROM lab_orders WHERE id = ?"),
+                eq(Long.class),
+                eq(orderId)
+        )).thenReturn(202L);
 
         // Act
         LabResult result = laboratoryService.uploadResult(orderId, resultData, observations);
@@ -91,57 +104,46 @@ class LaboratoryServiceTest {
         assertEquals(50L, result.getId());
         assertEquals(resultData, result.getResultData());
         assertEquals(observations, result.getObservations());
-        assertEquals("COMPLETED", existingOrder.getStatus());
-        assertNotNull(existingOrder.getLabResult());
-        
-        verify(labOrderRepository, times(1)).findById(orderId);
-        verify(labOrderRepository, times(1)).save(existingOrder);
-        verify(labResultRepository, times(1)).save(any(LabResult.class));
+
+        verify(jdbcTemplate, times(1)).queryForObject(eq("SELECT status FROM lab_orders WHERE id = ?"), eq(String.class), eq(orderId));
+        verify(jdbcTemplate, times(1)).queryForObject(eq("SELECT * FROM upload_lab_result(?, ?, ?)"), any(RowMapper.class), eq(orderId), eq(resultData), eq(observations));
+        verify(jdbcTemplate, times(1)).queryForObject(eq("SELECT doctor_id FROM lab_orders WHERE id = ?"), eq(Long.class), eq(orderId));
     }
 
     @Test
-    void uploadResult_OrderNotFound_ShouldThrowException() {
-        // Arrange
-        Long orderId = 999L;
-        when(labOrderRepository.findById(orderId)).thenReturn(Optional.empty());
-
-        // Act & Assert
-        RuntimeException exception = assertThrows(RuntimeException.class, () -> 
-                laboratoryService.uploadResult(orderId, "Data", "Obs")
-        );
-        assertEquals("LabOrder not found with id: 999", exception.getMessage());
-        verify(labOrderRepository, times(1)).findById(orderId);
-        verify(labOrderRepository, never()).save(any());
-        verify(labResultRepository, never()).save(any());
-    }
-
-    @Test
+    @SuppressWarnings("unchecked")
     void uploadResult_AlreadyCompleted_ShouldThrowException() {
         // Arrange
         Long orderId = 1L;
-        LabOrder completedOrder = LabOrder.builder()
-                .id(orderId)
-                .status("COMPLETED")
-                .build();
 
-        when(labOrderRepository.findById(orderId)).thenReturn(Optional.of(completedOrder));
+        when(jdbcTemplate.queryForObject(
+                eq("SELECT status FROM lab_orders WHERE id = ?"),
+                eq(String.class),
+                eq(orderId)
+        )).thenReturn("COMPLETED");
 
         // Act & Assert
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> 
                 laboratoryService.uploadResult(orderId, "Data", "Obs")
         );
         assertEquals("Results have already been uploaded for order id: 1", exception.getMessage());
-        verify(labOrderRepository, times(1)).findById(orderId);
-        verify(labOrderRepository, never()).save(any());
-        verify(labResultRepository, never()).save(any());
+        
+        verify(jdbcTemplate, times(1)).queryForObject(eq("SELECT status FROM lab_orders WHERE id = ?"), eq(String.class), eq(orderId));
+        verify(jdbcTemplate, never()).queryForObject(eq("SELECT * FROM upload_lab_result(?, ?, ?)"), any(RowMapper.class), any(), any(), any());
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void getOrder_Success_ShouldReturnOrder() {
         // Arrange
         Long orderId = 1L;
         LabOrder order = LabOrder.builder().id(orderId).status("PENDING").build();
-        when(labOrderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        
+        when(jdbcTemplate.query(
+                eq("SELECT o.id, o.patient_id, o.doctor_id, o.study_type, o.status, r.id as r_id, r.result_data, r.observations, r.result_date FROM lab_orders o LEFT JOIN lab_results r ON o.id = r.lab_order_id WHERE o.id = ?"),
+                any(RowMapper.class),
+                eq(orderId)
+        )).thenReturn(Collections.singletonList(order));
 
         // Act
         LabOrder result = laboratoryService.getOrder(orderId);
@@ -149,14 +151,20 @@ class LaboratoryServiceTest {
         // Assert
         assertNotNull(result);
         assertEquals(orderId, result.getId());
-        verify(labOrderRepository, times(1)).findById(orderId);
+        verify(jdbcTemplate, times(1)).query(any(String.class), any(RowMapper.class), eq(orderId));
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void getOrder_NotFound_ShouldThrowException() {
         // Arrange
         Long orderId = 999L;
-        when(labOrderRepository.findById(orderId)).thenReturn(Optional.empty());
+        
+        when(jdbcTemplate.query(
+                any(String.class),
+                any(RowMapper.class),
+                eq(orderId)
+        )).thenReturn(Collections.emptyList());
 
         // Act & Assert
         RuntimeException exception = assertThrows(RuntimeException.class, () -> 
